@@ -1,0 +1,119 @@
+\documentclass{article}
+
+\usepackage{float}
+
+\title{Lab0}
+\author{Amy Ko, SID: 24978168}
+
+\begin{document}
+
+\maketitle
+
+\section{Visualizing the data}
+
+Assault arrests and murder arrests seem to be positvely correlated.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=4, fig.cap = "Murder vs. Assault",fig.pos = "H">>=
+library(tidyverse)
+
+#load data
+data("USArrests")
+stateCoord <- read.table("~/git/STAT-215A-Fall-2017/week1/data/stateCoord.txt", header=TRUE)
+
+#convert row names to the first column
+USArrests <- rownames_to_column(USArrests, "State")
+stateCoord <- rownames_to_column(stateCoord, "State")
+
+#merge two tables
+merged <- full_join(USArrests, stateCoord) %>% filter(Murder!="NA")
+
+#plot murder vs. assault
+ggplot(merged) +
+  geom_point(aes(x=Murder, y=Assault))
+
+@
+
+
+This plot shows the outlier in a different color.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=4, fig.cap = "Assault vs. Murder",fig.pos = "H">>=
+ggplot(merged) +
+  geom_point(aes(x=UrbanPop, y=Rape, color=(Rape>4*IQR(Rape,na.rm=TRUE) & UrbanPop < 3*IQR(UrbanPop, na.rm=TRUE))))+
+  guides(color=FALSE)
+
+@
+
+Alaska is a scary place.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=8, fig.cap = "Rape vs. Urban population",fig.pos = "H">>=
+ggplot(merged) +
+  geom_text(aes(x=Murder, y=Assault, label=State))
+
+ggplot(merged) +
+  geom_text(aes(x=UrbanPop, y=Rape, label=State, color=(Rape>4*IQR(Rape, na.rm=TRUE) & UrbanPop < 3*IQR(UrbanPop, na.rm=TRUE))))+
+  guides(color=FALSE)
+
+
+@
+
+
+Murder rate by state, minus Hawaii and Alaska.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=6, fig.cap = "Murder rate by state",fig.pos = "H">>=
+
+#load map stuff
+states <- map_data("state")
+
+#convert all state names to lower case
+merged["State"][,] <- tolower(merged["State"][,])
+
+full_join(states, merged, by=c("region"="State")) %>%
+ggplot() +
+  geom_polygon(aes(x=long.x, y=lat, fill=Murder/UrbanPop, group=group), color="white")
+
+@
+
+
+\section{Regression}
+
+The residuals seem slightly higher for higher predicted values. Also, there is one clear outlier.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=6, fig.cap = "predicted vs. residual",fig.pos = "H">>=
+linearMod <- lm(Rape~UrbanPop, merged)
+ggplot() + 
+  geom_point(aes(x=linearMod$fitted.values,y=linearMod$residuals))+
+  labs(x="predicted values", y="residuals")
+@
+
+Linear regression on urban population vs. rape. The blue line shows the predicted values.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=6, fig.cap = "Urban population vs. Rape",fig.pos = "H">>=
+
+merged <- add_column(merged, "predicted"=linearMod$fitted.values)
+
+ggplot(merged) +
+  geom_point(aes(x=UrbanPop, y=Rape)) +
+  geom_smooth(aes(x=UrbanPop, y=predicted))
+
+@
+
+
+The red line shows the predicted values without the outlier.
+<<echo=FALSE,warning=FALSE, message=FALSE,fig.align="center", fig.height=3, fig.width=6, fig.cap = "Urban population vs. Rape",fig.pos = "H">>=
+
+#regression
+merged49 <- filter(merged, Rape<4*IQR(Rape) | UrbanPop>3*IQR(UrbanPop)) 
+linearMod2 <- lm(Rape ~ UrbanPop, merged49)
+
+#put predicted values into data frame; horizontally stack data frame
+test <- rbind(merged49, merged)
+
+
+test$predicted[1:49] <- linearMod2$fitted.values
+test <- add_column(test, regGroup=c(rep("1",49), rep("2", 50)))
+
+#plot
+ggplot(test) +
+  geom_point(aes(x=UrbanPop, y=Rape)) +
+  geom_smooth(aes(x=UrbanPop, y=predicted, color=regGroup)) +
+  scale_color_manual(values=c("red","blue"), breaks=c("2","1"), labels=c("All data","Without outlier"), name="Predicted values") + 
+  labs(x='Percent urban population',y='Rape arrests per 100,000',title="Relationship between urban population proportion and rape arrests")
+
+@
+
+
+\end{document}

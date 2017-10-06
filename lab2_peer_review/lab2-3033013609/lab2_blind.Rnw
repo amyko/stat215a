@@ -1,0 +1,1047 @@
+\documentclass[a4paper]{article}
+\usepackage{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parskip}{\smallskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{float}
+
+\begin{document}
+
+\title{Lab 2 - Linguistic Survey\\
+Stat 215A, Fall 2017}
+
+\author{SID: 3033013609}
+
+\maketitle
+
+<<setup, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# load libraries 
+library(tidyverse)
+library(forcats)
+library(lubridate)
+library(stringr)
+library(maps)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(ggmap)
+library(cluster)
+library(knitr)
+
+# load cleaning and loading functions for redwoods
+# load in the loadDataRedwood() functions
+source("R/loadRedwood.R")
+# load in the cleanDataRedwood() functions
+source("R/cleanRedwood.R")
+
+# load cleaning and loading functions for linguistics
+# load in the loadDataLinguistics() functions
+source("R/load.R")
+# load in the cleanDataLinguisitics() functions
+source("R/clean.R")
+
+# load redwood data 
+redwood_all_orig <- loadRedwoodData(
+  path = "data/", 
+  source = "all")
+
+# clean redwood data 
+redwood_all <- cleanRedwoodData(redwood_all_orig)
+
+# load linguistics data 
+ling_data_orig <- loadLingData(path = "data/", source = "Data")
+  
+# load location data 
+ling_location_orig <- loadLingData(path = "data/", source = "Location")
+
+# load question data
+# question_data contains three objects: quest.mat, quest.use, all.ans
+load("~/Desktop/Fall2017/Stat215A/stat215a/lab2/data/question_data.RData")
+
+# define plot theme for common legend
+plot_theme_grid <-  theme(plot.title = element_text(size = 12), 
+                      panel.background =  element_rect(fill = "white", colour = "grey50"), 
+                      panel.grid.minor= element_line(color = 'grey93')) 
+@
+
+\section{Introduction} This report is divided into two main sections.  The first section dicusses kernel density estimation and locally weighted scatter plot smoothing (LOESS) for data collected over forty-four days on two redwood trees in California.  The study looked at measurements of temperature, humidity, and solar radiation, at different heights on the trees.  Here I present analysis of the effects of bandwidth choice, as well as kernel type for kernel density estimation and polynomial degree for LOESS.  The second section focuses on data collected from a survey where individuals answered questions concerning pronounciation and word choice.  Participants across the United States participated in the survey.  In this section I investigate the connection between answers and geography as well as how answers relate to each other using principal component analysis (PCA) and spectral clustering.   Finally, I look at the stability of these algorithms by perturbing the data to determine if my findings should be trusted. 
+
+\section{Kernel Estimation and LOESS for Redwood Data}
+In this section I discuss kernel density estimation and LOESS with redwood data.  
+\subsection{Kernel Densisty Estimation} 
+To look at how bandwidth and kernel choice effect the estimate of the density I look at the values for temperature measurements. It should be noted that this data was extensively cleaned, which is described in detail in a previous report.  In this context we are considering the kernel density estimate as a way to visualize trends in the dsitribution of temperature, not as a functional estimate of the desnity itself.  The estimate is found by computing \[\frac{1}{n} \sum_{i = 1}^nK_h(x_i-x)\] for data $x$ and kernel $K_h$ with tuning parameter $h$.  Figure~\ref{fig:kernel} plots the kernel density estimates using gaussian and triangular kernels for varying bandwidths overlayed on the histogram to illustrate how closely the estimate follows the histogram. From these plots we can see that for smaller bandwidths the triangular and gaussian kernels produce similar results. However, as we increase bandwidth they start to move apart from one another slightly, as can be seen when using a bandwidth of five.   Additionally, it can be seen that as the bandwidth increases the density estimates get smoother. If too small of a bandwidth is used we risk overfitting, but too large creates the potential to lose information. This data appears to have three distinct modes, so it would be good to choose a bandwidth that reflects that trend.  When the bandwidth is increased to 1.5 we start to see only two modes, so a bandwidth of 1 seems to be an appropriate choice here because it captures the peaks from the hotter days as well as night time temperatures and those from the more normal days. 
+<<kernel, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=6, fig.width=6, fig.cap = "Plot showing the effects of bandwidth and kernel choice for kernel density estimation. ", fig.pos = "H">>=
+# do kernel estimation with bandwith = .5
+p1 <- ggplot(redwood_all, aes(x = temp)) + 
+        # plot histogram
+        geom_histogram(aes(y=..density..),alpha = 0.1) +
+        # plot gaussian kernel
+        geom_line(aes(color = 'black'), bw = .5, 
+                  kernel = 'gaussian', alpha = 0.5, stat = 'density') + 
+        # plot triangular kernel
+        geom_line(aes(color = 'red3'), bw = .5, 
+                  kernel = 'triangular', alpha = 0.5, stat = 'density') + 
+        plot_theme_grid + 
+        theme(axis.title = element_blank()) + 
+        # define legend
+        scale_colour_manual(
+          name = 'Kernel Type', 
+          values =c('black'='black','red3'='red3'), 
+          labels = c('Gaussian','Triangular')) + 
+        ggtitle("Bandwidth = 0.5")
+
+# do kernel estimation with bandwith = 1
+p2 <- ggplot(redwood_all, aes(x = temp)) + 
+        # plot histogram
+        geom_histogram(aes(y=..density..),alpha = 0.1) +
+        # plot gaussian kernel
+        geom_line(bw = 1, kernel = 'gaussian', 
+                  alpha = 0.5, color = 'black', stat = 'density') + 
+        # plot triangular kernel
+        geom_line(bw = 1, kernel = 'triangular', 
+                  alpha = 0.5, color = 'red3', stat = 'density') + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 1")
+
+# do kernel estimation with bandwith = 1.5
+p3 <- ggplot(redwood_all, aes(x = temp)) + 
+        # plot histogram
+        geom_histogram(aes(y=..density..),alpha = 0.1) +
+        # plot gaussian kernel
+        geom_line(bw = 1.5, kernel = 'gaussian', 
+                  alpha = 0.5, color = 'black', stat = 'density') + 
+        # plot triangular kernel
+        geom_line(bw = 1.5, kernel = 'triangular', 
+                  alpha = 0.5, color = 'red3', stat = 'density') + 
+        plot_theme_grid + 
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 1.5")
+
+# do kernel estimation with bandwith = 3
+p4 <- ggplot(redwood_all, aes(x = temp)) + 
+        # plot histogram
+        geom_histogram(aes(y=..density..),alpha = 0.1) +
+        # plot gaussian kernel
+        geom_line(bw = 5, kernel = 'gaussian', 
+                  alpha = 0.5, color = 'black', stat = 'density') + 
+        # plot triangular kernel
+        geom_line(bw = 5, kernel = 'triangular', 
+                  alpha = 0.5, color = 'red3', stat = 'density') + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 5")
+
+# define legend 
+g1 <- ggplotGrob(p1)
+id.legend <- grep("guide", g1$layout$name)
+legend <- g1[["grobs"]][[id.legend]]
+lwidth <- sum(legend$width)
+
+# define layout matrix 
+layout = rbind(c(1,1,1,2,2,2,5),c(3,3,3,4,4,4,5))
+
+#arrange plots 
+library(grid)
+grid.arrange(p1 + theme(legend.position="none"),p2,p3,p4, 
+             legend, layout_matrix = layout, 
+             top = textGrob('Kernel Density Estimates', 
+                            gp=gpar(fontsize=15,font=8, face = 'bold')), 
+             left = 'Density', bottom = 'Temperature')
+@
+
+\subsection{LOESS}
+Next we look at the trends in the relationship between temperature and humidity using LOESS.  LOESS is a non-parametric way of visualizing non linear trend-lines, which fits local polynomials to small subsets of the data and aggregates that into a smooth curve.  When performing LOESS there are two basic choices, first, which polynomial is chosen to fit locally, and second, the bandwidth.  Smaller bandwidths lead to smaller windows for each local polynomial that is fit to a subset of the data.  I choose to look at the relationship between temperature and humidity of the redwood trees at two o'clock in the afternoon.  From Figure~\ref{fig:loess} we see that as bandwidth increases the fit lines become smoother and less sensitive to noise in the data, while the smaller bandwidths lead to overfitting.  Additionally in fitting the first and second degree polynomials we see that the second degree polynomials cause a lot more wiggliness in the fit than the first.  If we choose to small of a bandwidth for the second degree polynomial, the areas between the clusters in the temperatures cause sharp dips or peaks in the curve, which is not ideal.  Inspecting the plots shows that for a linear local polynomial a bandwidth of $0.75$ captures the trend without overfitting, while larger bandwidths seems lead to overly smoothed curves.  Using looks second degree polynomial it looks as if a bandwidth of 1.5 works best, however overall the linear fitting works better in this instance. 
+<<loess, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=6, fig.width = 7, fig.cap = "Plot showing the effects of bandwidth and polynomial choice for local polynomial smoothing. ", fig.pos = "H">>=
+# epoch mod 288 is constant will all be at the same time of day
+two_pm <- redwood_all %>% 
+            mutate(time = number %% 288) %>%
+            filter(time == 110)
+
+# plots humidity versus temperature at 2pm
+# add 1st and second degree polynomials for LOESS bw = .6
+p1 <- ggplot(data = two_pm, aes(x = temp, y= humidity)) + 
+        geom_point(alpha = 0.1) + 
+        # 1st degree
+        geom_smooth(aes(color = 'green3'), method = 'loess', 
+                    span = .6, formula = y~poly(x,1), se = FALSE) + 
+        # 2nd degree
+        geom_smooth(aes(color = 'red3'), method = 'loess', 
+                    span = .6, formula = y~poly(x,2), se = FALSE) + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwith = 0.6") + 
+        # define legend
+        scale_colour_manual(
+          name = 'Polynomial Degree', 
+          values =c('green3'='green3','red3'='red3'), 
+          labels = c('First','Second'))
+
+# add 1st and second degree polynomials for LOESS bw = .75
+p2 <- ggplot(data = two_pm, aes(x = temp, y= humidity)) + 
+        geom_point(alpha = 0.1) + 
+        # 1st degree
+        geom_smooth(method = 'loess', span = .75, 
+                    formula = y~poly(x,1), color = 'green3', se = FALSE) + 
+        # second degree
+        geom_smooth(method = 'loess', span = .75, 
+                    formula = y~poly(x,2), color = 'red3', se = FALSE) + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 0.75")
+
+# add 1st and second degree polynomials for LOESS bw = .1
+p3 <- ggplot(data = two_pm, aes(x = temp, y= humidity)) + 
+        geom_point(alpha = 0.1) + 
+        # 1st degree
+        geom_smooth(method = 'loess', span = 1, 
+                    formula = y~poly(x,1), color = 'green3', se = FALSE) + 
+        # 2nd degree 
+        geom_smooth(method = 'loess', span = 1, 
+                    formula = y~poly(x,2), color = 'red3', se = FALSE) + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 1")
+
+# add 1st and second degree polynomials for LOESS bw = 1.5
+p4 <- ggplot(data = two_pm, aes(x = temp, y= humidity)) + 
+        geom_point(alpha = 0.1) + 
+        #1st degree
+        geom_smooth(method = 'loess', span = 1.5, 
+                    formula = y~poly(x,1), color = 'green3', se = FALSE) + 
+        #2nd degree
+        geom_smooth(method = 'loess', span = 1.5, 
+                    formula = y~poly(x,2), color = 'red3', se = FALSE) + 
+        plot_theme_grid +
+        theme(axis.title = element_blank()) + 
+        ggtitle("Bandwidth = 1.5")
+
+# define legend 
+g1 <- ggplotGrob(p1)
+id.legend <- grep("guide", g1$layout$name)
+legend <- g1[["grobs"]][[id.legend]]
+lwidth <- sum(legend$width)
+
+# define layout matrix 
+layout = rbind(c(1,1,2,2,5),c(3,3,4,4,5))
+
+#arrange plots 
+library(grid)
+grid.arrange(p1 + theme(legend.position="none"),p2,p3,p4, 
+             legend, layout_matrix = layout, 
+             top = textGrob('LOESS trend lines', 
+                            gp=gpar(fontsize=15,font=8, face = 'bold')), 
+             left = 'Humidity', bottom = 'Temperature')
+@
+
+\section{Linguistic Data}
+Now that I have looked into kernel density estimates and LOESS I move to discussion of the linguistic data, including data cleaning, exploratorary data analysis, dimension reduction, clustering, and stability.  
+\subsection{The Data} 
+<<echo = FALSE, warning = FALSE, message = FALSE>>= 
+# compute dimensions of data
+n_ling <- dim(ling_data_orig)[1]
+n_ques <- dim(ling_data_orig)[2]
+n_loc <- dim(ling_location_orig)[1]
+@
+The data in this section is composed of responses to a questionnaire where \Sexpr{n_ling} individuals responded to questions concerning how they pronounce words or the different terms people use for the same entity, and we focus on the latter of which there are \Sexpr{n_ques} questions asked.  As an example, one question on the survey asked "What do you call the long narrow place in the middle of a divided highway?" The potential responses to choose from were: median strip, median, boulevard, mall, traffic island, neutral ground, island, pork strip, I have no word for this, and other.  The questions were designed as to not lead the responder into choosing a specific answer.  The data was split into multiple datasets for analysis.  One dataset contained the responses for each individual with one column for each question, as well as columns with longitude and latitude, city, state, and zipcode. The second primary dataset contained one column for each potential answer with \Sexpr{n_loc} rows corresponding to the data pooled into squares on one degree latitude by one degree longitude.   
+
+\subsubsection{Data quality and cleaning}
+When doing an initial investigation of the data I noticed that there were $1023$ cases with missing data in the dataset with one row for each individual.  The missing data, was corresponding to missing latitude and longitude values.  To address this issue, I used the geocode() function in the ggmap package to look up the longitude and latitude for the city, state, and zip code at that observation.  I saved what was returned from geocode() to a csv file to enable quick access, as the geocode() function is time intensive.  After completing this process I found that there are $12$ missing latitude and longitude values so we look into those ID's in the original data. 
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# collect cases with missing values
+missing_latlon <- ling_data_orig[!complete.cases(ling_data_orig),] %>% 
+  rename(zip = ZIP) %>% 
+  mutate(zip = as.character(zip))
+
+# read in csv file 
+# file was created using geocode() function 
+geo_reply = read.csv("R/georeply")
+
+# now extract the bits that we need from the returned list
+answer = data.frame(latitude=geo_reply$lat, 
+                    longitude=geo_reply$lon, 
+                    ID=missing_latlon$ID)
+
+# determine what values are missing still 
+LatLon_Missing = c()
+k=1
+for(i in 1:1023){
+  if(is.na(geo_reply$lon[i])){
+    LatLon_Missing[k] = missing_latlon$ID[i]
+    k = k + 1
+  }
+}
+
+# look at missing values in original data
+missing <- ling_data_orig %>% 
+  filter(ID %in% LatLon_Missing)
+@
+Looking into those $12$ observations I noticed that the corresponding towns or zip codes were not inputted correctly.  However, there were of four these observations that I could manually find the latitude and longitude online and I added those values to the data. The next step in the cleaning process was to visualize the data on the map of the United States and remove the observations that were outside the United States.  Some responders entered zip codes and towns in Canada or other countries that I choose to remove.  
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# join geo_reply information with ling_data_orig 
+ling_data <- full_join(ling_data_orig, answer)
+
+# fix the lat and long variables 
+ling_data <- ling_data %>% 
+  # if the values were missing replace
+  mutate(lat = ifelse(is.na(lat), 
+                      latitude, lat)) %>% 
+  mutate(long = ifelse(is.na(long), 
+                       longitude, long)) %>%
+  # delete extra columns 
+  select(-c(latitude, longitude)) %>% 
+  # delete rows from outside the country 
+  filter(!(ID %in% c(24440, 41913, 46064, 49676, 6735,30989,
+                     44447,9098, 23654, 24628, 24237, 4897))) %>%
+  # add values manually 
+  # Santa Barbara, CA
+  mutate(long = ifelse(ID == 48458, -119.6982, long)) %>% 
+  mutate(lat = ifelse(ID == 48458, 34.4208, lat)) %>%
+  # Manassas, VA
+  mutate(long = ifelse(ID == 46628, -77.4753, long)) %>% 
+  mutate(lat = ifelse(ID == 46628, 38.7509, lat)) %>%
+  # Brookline, MA
+  mutate(long = ifelse(ID == 48051, -71.1212, long)) %>% 
+  mutate(lat = ifelse(ID == 48051, 42.3318, lat)) %>%
+  # Leeds, WY
+  mutate(long = ifelse(ID == 1959, -106.16435, long)) %>% 
+  mutate(lat = ifelse(ID == 1959, 41.070928, lat)) %>%
+  # omit any values that are missing now (Like Sasasa, KY which doesnt seems to exist)
+  na.omit() 
+@
+
+The final step in our cleaning process was to create a data set where we code the answers into binary variables.  This was done to enable the use of dimension reduction techniques and to help in understanding how answers relate to one another.  
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# function to take a column of non binary dataset and make binary
+toBinaryCol <- function(ling_col, length, ans_list = all.ans, n){
+  # inputs: ling_col - column of ling_data
+  #         ans_list - list of answers
+  #         length - number of potential answers 
+  #         n number of observations
+  # output: binary_ans_apply - binary vector for 1 question
+  
+  # create a matrix with n columns and 
+  binary_ans_apply <- matrix(rep(0,n*length), 
+                             nrow = n, ncol = length)
+  # set binary_ans matrix
+  # loop through each individual
+  for(j in 1: length(ling_col)){
+    # loop through each answer
+    for(i in 1:length){
+      # if they answered with that number set value to 1
+      if(ling_col[j] == i){
+        binary_ans_apply[j,i] = 1
+      # if not remains at 0
+      }else{
+        binary_ans_apply[j,i] = 0 
+      }
+    }
+  }
+  return(binary_ans_apply)
+}
+
+# number of observations 
+n = dim(ling_data)[1]
+
+# get for column names
+col_names <- colnames(ling_data)
+# create matrix to store values in
+binary_ans_temp <- matrix(rep(0,n*468), nrow = n, ncol = 468)
+#store temporary value for indexing
+old_length <- 0
+# create vector to store question number
+which_ques <- rep(0,n*468)
+
+# call toBinaryAns for each equestion
+for(i in 5:71){
+  # save question number 
+  question_num <- substr(col_names[i],2,4)
+  question_num <- as.numeric(question_num)
+  question_num <- as.character(question_num)
+  # compute answers for that question
+  answers <- all.ans[[question_num]]
+  # save number of answers
+  length <- dim(answers)[1]
+  
+  # call toBinaryCol
+  binary_ans_temp[,(old_length + 1):(old_length+length)] = 
+    toBinaryCol(ling_data[,i], length, ans_list = all.ans,n = n)
+  
+  # save quesition
+  which_ques[(old_length + 1):(old_length+length)] <- question_num
+  
+  # update indexing
+  old_length <- old_length + length
+}
+
+# make into data frame
+binary_ans_temp <- data.frame(binary_ans_temp)
+
+# add ID numbers 
+binary_ans_temp <- cbind(ID = ling_data$ID, binary_ans_temp)
+
+# combine this with the ID's and longitude/latitude
+binary_ans <- full_join(ling_data, binary_ans_temp, by = 'ID') %>% 
+  # delete unneccesarry rows
+  select(-starts_with("Q"), -starts_with('CITY'), -starts_with('ZIP'))
+@
+
+\subsubsection{Exploratory Data Analysis} 
+In order to further explore the intricacies of the data I looked at two questions to determine how they relate to each other and how they relate to geography.  The questions I choose to look at were (1) "What word(s) do you use to address a group of two or more people?" and (2) "What is your generic term for a sweetened carbonated beverage?" I choose these questions, because when plotting the distributions of the answers of the map of the US they roughly defined geographic regions that from prior knowledge I would assume have different dialects.  Many of the other questions exhibited similar patterns when looking at the plots, however these exhibited the behavior more clearly.  However, it should be noted there were a number of questions that seemed to give relatively uniform answers across the United States.  The questionnaire had ten possible answers for the term for carbonated beverage and nine for the plural term for second person.  Looking at the distributions of the answers for carbonated beverages, "soda," "pop," "coke," or "soft drink" made up over $96\%$ of the responses, so I choose to only display those on the map.  Additionally for plural second person reference "you all," "you guys," "you," and "y'all" accounted for approximately $94\%$ of the responses.  
+ 
+<<two_ques, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=4, fig.width = 7, fig.cap = "Projection of answers to  (1) What is your generic term for a sweetened carbonated beverage? and (2) What word(s) do you use to address a group of two or more people? onto a map of the United States to visiualize the geographical variation in dialect.", fig.pos = "H">>=
+
+# data for state map
+state_df <- map_data("state")
+
+# extract question 105 from data 
+carbonated_bev <- ling_data %>% 
+  filter(Q105 %in% c(1, 2, 3,  5), long > -125)
+
+# extract the answers to question 105
+answers_q105 <- all.ans[['105']]
+
+# Make the column to join on.  They must be the same type.
+answers_q105$Q105 <- rownames(answers_q105)
+carbonated_bev$Q105 <- as.character(carbonated_bev$Q105)
+carbonated_bev <- inner_join(carbonated_bev, answers_q105, by = "Q105")
+
+# look at secong question
+second_person <- ling_data %>% 
+  filter(Q050 %in% c(1, 4, 7,9), long > -125)
+# extract the answers to question 50
+answers_q50 <- all.ans[['50']]
+
+# Make the column to join on.  They must be the same type.
+answers_q50$Q050 <- rownames(answers_q50)
+second_person$Q050 <- as.character(second_person$Q050)
+second_person <- inner_join(second_person, answers_q50, by = "Q050")
+
+# create map theme
+plot_theme_map <- theme(plot.title = element_text(size = 15, face = 'bold'), 
+      panel.background =  element_rect(fill = "white", colour = "grey50"), 
+      panel.grid.minor= element_line(color = 'grey93'), 
+      axis.text = element_blank(), axis.ticks = element_blank(),
+      axis.title = element_blank()) 
+
+# Plot question 1 
+p1 <- ggplot(carbonated_bev) +
+        geom_point(aes(x = long, y = lat, color = ans), 
+             size = 2, alpha = 0.5) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+            data = state_df, colour = "black", fill = NA) + 
+        # add theme
+        plot_theme_map + 
+        #add label
+        labs(x = 'Longitude', y = 'Latitude') + 
+        scale_color_discrete(name = "Answers") 
+
+# Plot question 2 
+p2 <- ggplot(second_person) +
+        geom_point(aes(x = long, y = lat, color = ans), 
+             size = 2, alpha = 0.5) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+             data = state_df, colour = "black", fill = NA) + 
+        # add theme
+        plot_theme_map +
+        #add label
+        labs(x = 'Longitude', y = 'Latitude') + 
+        scale_color_discrete(name = "Answers")
+
+# define legend 
+g1 <- ggplotGrob(p1)
+id.legend <- grep("guide", g1$layout$name)
+legend1 <- g1[["grobs"]][[id.legend]]
+lwidth <- sum(legend1$width)
+
+# define legend 
+g2 <- ggplotGrob(p2)
+id.legend <- grep("guide", g2$layout$name)
+legend2 <- g2[["grobs"]][[id.legend]]
+lwidth <- sum(legend2$width)
+
+# define layout matrix 
+layout = rbind(c(1,1,2,2),c(1,1,2,2),c(3,3,4,4))
+
+# create grid of plots
+grid.arrange(p1 + theme(legend.position="none"),
+             p2 + theme(legend.position="none"), 
+             legend1, legend2, layout_matrix = layout)
+@
+
+Looking at Figure~\ref{fig:two_ques} we can see that both questions have answers that are confined relatively to one geographic area.  For the carbonated beverage question the large majority of people who say "pop" are in the Midwest and Northwest, those who say "coke" and "soft drink" are primarily in the South, while "soda" seems to be spread throughout the country with higher concentrations on the West coast and the Northeast.  The responses to how an individual refers to a group of people define fewer geographic regions as "you," "you all," and "you guys" are scattered around most of the country.  However, there is an intense concentration of using the term "y'all" in the South.  There are patterns in both of these maps that agree with my intuitive knowledge based on my interactions with people throughout the United States.  
+
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# look at correlation between the questions 
+# look for Q105 in the binary data 
+carbonated_bev <-  cbind(binary_ans[,1:4], binary_ans[,388:397])
+
+# look for Q50
+second_person <- cbind(binary_ans[,1:13])
+
+# look at correlation 
+correlations <- cor(carbonated_bev[,5:14],second_person[,5:13])
+@
+
+Now that we have considered how the individual questions and answers are distributed throughout the United States, we attempt to determine what relationships exists between the questions themselves.  From examining the plots in Figure~\ref{fig:two_ques}, we can see that there seems to be a connection between answering question 1 with "coke" and question 2 with "y'all," but other connections are not immediately apparent.  This led me to consider the correlations between the answers to the questions.  I found that the strongest correlation, as expected, is between "coke" and "y'all" with a value of \Sexpr{round(correlations[3,9],2)}.  So, if we knew a person called a carbonated beverage "coke" we could predict (with more certainty than not having that information) that they would have use the term "y'all," but this would not be correct a large amount of the time as there is some intermingling with other responses.  We can also see that "y'all" is negatively correlated with "soda" (\Sexpr{round(correlations[1,9],2)}) and "pop"  (\Sexpr{round(correlations[2,9],2)}).  This appears to be because "soda" and "pop" are concentrated in the Northeast or West Coast and Midwest respectively, where the majority of people do not use "y'all".  Additionally "pop" and "you guys" are correlated (\Sexpr{round(correlations[2,4],2)}), which also matches with their appearance on the map, with the response "you guys" covering the large majority of the Midwest were "pop" is primarily used.  A final interesting correlation, albeit small (\Sexpr{round(correlations[8,2],2)}), is between "fizzy drink" and "youse" both of which are terms I would typically associate with British or Australian dialects.  Neither of those responses were common, but there seems to be some connection between people who use those terms.  
+
+\subsection{Dimension reduction methods}
+After cleaning and exploring the data the next step was to employ dimension reduction and clustering techniques to determine if my speculated findings concerning the two questions in the previous section could be seen throughout the data.  
+\subsubsection{Principal component analysis}
+To start looking at dimension reduction I used the entire binary dataset and performed PCA on the columns that corresponded to the answers to the questions.  However, when looking at the resulting screeplot from that analysis I found that I would need to use the first $126$ principal components to explain $50\%$ of the variability of the data. 
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=3, fig.width = 6, fig.cap = "The cumulative proportion of variability explained by the principle components after doing PCA on the binary dataset is on the right.  On the left is the scree plot to determine the number of principal components used.  The red dot marks the 126 component where approximately half of the variability is explained.", fig.pos = "H">>=
+
+# extract columns corresponding to answers
+binary_matrix <- binary_ans[,5:472]
+
+# do PCA
+binary_PCA <- prcomp(binary_matrix, scale = T)
+
+# compute cumulative proportions
+binary_PCA_with_prop <- data.frame(eigenvalue = binary_PCA$sdev^2,
+          component = 1:ncol(binary_matrix)) %>%
+          mutate(cum_prop_var = cumsum(eigenvalue) / sum(eigenvalue))
+component_50 <- binary_PCA_with_prop %>% 
+  filter(cum_prop_var >.5, cum_prop_var <.503) %>% 
+  distinct(component)
+
+# plot theme
+plot_theme <- theme(plot.title = element_text(size = 15, face = 'bold'), 
+    panel.background =  element_rect(fill = "white", colour = "grey50"), 
+    panel.grid.minor= element_line(color = 'grey93'))
+
+# scree plot highlighting that value 
+p1 <- binary_PCA_with_prop %>% 
+    mutate(elbow = (component == component_50[1,1])) %>% 
+    ggplot() + 
+      geom_line(aes(x = component, 
+                    y = cum_prop_var)) +
+      geom_point(aes(x = component, 
+                     y = cum_prop_var, col = elbow, size = elbow)) +
+      theme_classic() +
+      scale_color_manual(values = c("grey20", "red3")) +
+      theme(legend.position = "none") + 
+      plot_theme +
+      labs(y = "Cumulative Proportion (%)", x = "Component") + 
+      ggtitle("Cumulative proportion")
+
+# data frame for second type of scree plot
+binary_PCA_df <- data.frame(eigenvalue = binary_PCA$sdev^2,
+          component = 1:ncol(binary_matrix))
+
+# plot second type of scree plot
+p2 <- ggplot(binary_PCA_df  %>% filter( component %in% 1:150)) + 
+        geom_point(aes(x = component, y = eigenvalue)) +
+        geom_point(aes(x = 126, 
+                       y = eigenvalue[126]), color = 'red3', size = 5) + 
+        geom_line(aes(x = component,y = eigenvalue)) + 
+        plot_theme +
+        labs(y = "Variance", x = "Component") + 
+        ggtitle("Scree plot") + 
+        scale_color_manual('red3') + 
+        ylim(0,NA)
+
+# arrange
+grid.arrange(p1,p2, ncol = 2)
+
+@
+This realization led me to consider the location dataset, which binned the binary answers into groupings that were 1 degree latitude by 1 degree longitude. By grouping the data in this way I do not reduce the dimensions of the covariates, there are still $p = 468$ columns corresponding to each possible answer, but I do reduce the number of rows drastically from $n = 47448$ to $n = 758$.  The purpose of taking this step was to potentially find a smaller number of principle components that more effectively summarize the data. In order to perform PCA on the data I first normalized the rows by the number of people in each cell to prevent the cells with large numbers of people from effecting the data.  I found that simply scaling prior to doing PCA was did not address this issue.  Performing PCA on this new data set and investigating the scree plot below I found determined that after $22$ principle components around $50\%$ of the variability is explained and the percent explained by each additional component does not add enough to warrant being included in the analysis.  Using the location dataset we can notice that the first $5$ principle components appear to explain $25\%$ of the variability, which is a big contrast to using the entire dataset where only $7\%$ was explained. 
+
+
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=3, fig.width = 6, fig.cap = "The cumulative proportion of variability explained by the principle components after doing PCA on the binary dataset is on the right.  On the left is the scree plot to determine the number of principal components used.  The red dot marks the 126 component where approximately half of the variability is explained, and the blue dot is eighth component where the scree plot begins to flatten.", fig.pos = "H">>=
+
+# normalize the rows by the number of people
+ling_location <- filter(ling_location_orig, Longitude > -125)
+for(i in 1:dim(ling_location)[1]){
+  ling_location[i,4:471] <- ling_location[ i,4:471]/ling_location[i,1]
+}
+
+# store columns corresponding to answers only 
+location_matrix <- ling_location[,4:471]
+# center matrix, but do not scale
+location_matrix <- scale(location_matrix, scale = FALSE, center = TRUE)
+
+# do PCA
+location_PCA <- prcomp(location_matrix)
+
+# compute cumulative proportions
+location_PCA_with_prop <- data.frame(eigenvalue = location_PCA$sdev^2,
+          component = 1:ncol(location_matrix)) %>%
+          mutate(cum_prop_var = cumsum(eigenvalue) / sum(eigenvalue))
+component_elbow <- location_PCA_with_prop %>% 
+  filter(cum_prop_var >.50, cum_prop_var <.51) %>% 
+  distinct(component)
+
+#scree plot or cum prop highlighting that value 
+p1 <- location_PCA_with_prop %>% 
+        mutate(elbow = (component == component_elbow[1,1])) %>% 
+        ggplot() + 
+          geom_line(aes(x = component, y = cum_prop_var)) +
+          geom_point(aes(x = component, y = cum_prop_var, 
+                         col = elbow, size = elbow))+
+          geom_point(aes(x = 8, y = cum_prop_var[8]), 
+                     color = 'blue3', size = 5) +
+          scale_color_manual(values = c("grey20", "red3")) +
+          theme(legend.position = "none") + 
+          plot_theme +
+          labs(y = "Cumulative Proportion (%)", x = "Component") + 
+          ggtitle("Cumulative proportion")
+
+# save dataframe for 2nd scree plot
+location_PCA_df <- data.frame(eigenvalue = location_PCA$sdev^2,
+          component = 1:ncol(location_matrix))
+
+# plot second type of scree plot, highlighting elbow
+p2 <- ggplot(location_PCA_df  %>% filter( component %in% 1:50)) + 
+        geom_point(aes(x = component, y = eigenvalue)) +
+        # highlight .50
+        geom_point(aes(x = 22, 
+                       y = eigenvalue[22]), color = 'red3', size = 5) + 
+        # highlight elbow
+        geom_point(aes(x = 8, 
+                       y = eigenvalue[8]), color = 'blue3', size = 5) + 
+        geom_line(aes(x = component,y = eigenvalue)) + 
+        plot_theme +
+        labs(y = "Variance", x = "Component") + 
+        ggtitle("Scree plot") + 
+        scale_color_manual('red3') + 
+        ylim(0,NA)
+
+# arrange plots 
+grid.arrange(p1,p2, ncol = 2)
+@
+Ultimately after looking at both versions of the screeplot, I determined that using eight clusters was appropriate.  Although there is only \Sexpr{round(location_PCA_with_prop$cum_prop_var[8],3)} amount of variability explained, the second scree plot appears to have an elbow at eight principle components, where each additional component would not add enough more information to warrant including.  
+
+After deciding the number of components to use in my analysis, I look at in my analysis I investigated the loadings from PCA to determine which questions/answers contributed more heavily to the principle components than others.  
+<<echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE>>=
+# compute loadings 
+loadings <- location_PCA$rotation
+loadings <- as.data.frame(loadings) %>% 
+  mutate(answer = rownames(loadings))
+
+# find which rows compute maximum values for the first component 
+loadings_PC1 <- loadings %>% select(PC1, answer) %>% 
+  arrange(desc(PC1))
+loadings_PC2 <- loadings %>% select(PC2, answer) %>% 
+  arrange(desc(PC2))
+
+# look in which question vector produced when computing binary data frame
+pc1_ques <- c(which_ques[9], which_ques[201], which_ques[376]) 
+pc2_ques <- c(which_ques[26], which_ques[165], which_ques[384])
+
+@ 
+By looking into the first two principal components I found that answering "y'all" when a person was asked how they refer to a group of two or more people contributed most to the 1st component. Additionally, responding "catty-corner" when asked what a person refers to something diagonally across from them, and calling the object that kids drink from at school a "water fountain" were the next two highest contributors. For the second component the biggest contributor answering that is was acceptable to not wear pantyhose, second was answering "sneakers" for the general term for athletic shoes, and third was responding "soda" when asked what a person refers to a carbonated beverage as. Looking at the projection of these three question onto the map it appears that the question/answer pairs that are most important to the largest principle components are the answers that are most confined to a geographic area and that cover a lot of people.  For example, using "y'all" was heavily concentrated in the South as seen in Figure~\ref{fig:two_ques}, which is a defined area with good amount of people.  Additionally, referring to carbonated beverages as "soda" was concentrated both in the Northeast and the West and covered a large proportion of people surveyed.  Overall, this gives a good indication that PCA is correctly picking out aspects of the data that give important information.  
+
+\subsubsection{Spectral clustering (using k-means)}
+After computing the principal components of the data, I explored clustering the data using k-means on the first eight components of the location datasets. Looking at Figure~\ref{fig:sil} we see the silhouette plots corresponding to three, four, five, or six clusters using the first eight principal components.  I choose to consider these number of clusters from investigating a plot of the within group sum of squares versus the number of clusters, as well as from the intuition that producing more than six groupings would separate the country into more distinct dialect regions.
+<<sil, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=4, fig.width = 7.5, fig.cap = "Four silhouette plots corresponding to the using 3, 4, 5, or 6 clusters doing k-means on the first eight principal components on the location dataset.", fig.pos = "H">>=
+
+# do kmeans for 3,4,5, and 6 clusters
+kmeans_3 <- kmeans(location_PCA$x[,1:8], 
+                   centers = 3, iter.max = 1000, nstart = 1)
+kmeans_4 <- kmeans(location_PCA$x[,1:8], 
+                   centers = 4, iter.max = 1000, nstart = 1)
+kmeans_5 <- kmeans(location_PCA$x[,1:8], 
+                   centers = 5, iter.max = 1000, nstart = 1)
+kmeans_6 <- kmeans(location_PCA$x[,1:8], 
+                   centers = 6, iter.max = 1000, nstart = 1)
+
+# save labeling for each number of clusters
+labels_3 <- as.factor(kmeans_3$cluster)
+labels_4 <- as.factor(kmeans_4$cluster)
+labels_5 <- as.factor(kmeans_5$cluster)
+labels_6 <- as.factor(kmeans_6$cluster)
+
+# compute silhouette widths
+dist.mat <- dist(location_PCA$x[, 1:8])
+s <- silhouette(kmeans_3$cluster, dist.mat)
+
+# average silhouette width
+overall_mean_3 <- mean(s[, 3])
+
+# compute length of clusters 
+s_df <- data.frame(cluster = s[,1], sil_width = s[,3])
+cluster1_length = dim(s_df %>% filter(cluster == 1))[1]
+cluster2_length = dim(s_df %>% filter(cluster == 2))[1]
+cluster3_length = dim(s_df %>% filter(cluster == 3))[1]
+lengths <- c(cluster1_length, cluster2_length, cluster3_length)
+
+# manually plot silhouette widths for each number of clusters
+# 3 clusters
+p1 <- ggplot() + 
+  geom_col(data = s_df %>% 
+               filter(cluster == 1) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c(1:lengths[1])), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'darkolivegreen3', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 2) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((lengths[1] + 1):(sum(lengths[1:2])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'cyan4', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 3) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:2]) + 1):(sum(lengths[1:3])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill= 'coral1', alpha = 0.5) +
+  coord_flip() + 
+  labs(y = "Silhouette Width") + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  plot_theme
+
+# silhouette for 4 clusters 
+s <- silhouette(kmeans_4$cluster, dist.mat)
+
+# average silhouette width
+overall_mean_4 <- mean(s[, 3])
+
+# compute length of clusters 
+s_df <- data.frame(cluster = s[,1], sil_width = s[,3])
+cluster1_length = dim(s_df %>% filter(cluster == 1))[1]
+cluster2_length = dim(s_df %>% filter(cluster == 2))[1]
+cluster3_length = dim(s_df %>% filter(cluster == 3))[1]
+cluster4_length = dim(s_df %>% filter(cluster == 4))[1]
+lengths <- c(cluster1_length, cluster2_length, 
+             cluster3_length, cluster4_length)
+
+# plot 4 clusters
+p2 <- ggplot() + 
+  geom_col(data = s_df %>% 
+               filter(cluster == 1) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c(1:lengths[1])), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'darkolivegreen3', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 2) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((lengths[1] + 1):(sum(lengths[1:2])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'cyan4', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 3) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:2]) + 1):(sum(lengths[1:3])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill= 'coral1', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 4) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:3]) + 1):(sum(lengths[1:4])))), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'black', alpha = 0.5) +
+  coord_flip() + 
+  labs(y = "Silhouette Width") + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  plot_theme
+
+# look at 5 clusters 
+s <- silhouette(kmeans_5$cluster, dist.mat)
+# average silhouette width
+overall_mean_5 <- mean(s[, 3])
+
+# compute length of clusters 
+s_df <- data.frame(cluster = s[,1], sil_width = s[,3])
+cluster1_length = dim(s_df %>% filter(cluster == 1))[1]
+cluster2_length = dim(s_df %>% filter(cluster == 2))[1]
+cluster3_length = dim(s_df %>% filter(cluster == 3))[1]
+cluster4_length = dim(s_df %>% filter(cluster == 4))[1]
+cluster5_length = dim(s_df %>% filter(cluster == 5))[1]
+lengths <- c(cluster1_length, cluster2_length, 
+             cluster3_length, cluster4_length, cluster5_length)
+
+# plot for 5 clusters
+p3 <- ggplot() + 
+  geom_col(data = s_df %>% 
+               filter(cluster == 1) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c(1:lengths[1])), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'darkolivegreen3', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 2) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((lengths[1] + 1):(sum(lengths[1:2])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'cyan4', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 3) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:2]) + 1):(sum(lengths[1:3])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill= 'coral1', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 4) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:3]) + 1):(sum(lengths[1:4])))), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'black', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 5) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:4])+ 1):(sum(lengths[1:5])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'red4', alpha = 0.5) +
+  coord_flip() + 
+  labs(y = "Silhouette Width") + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  plot_theme
+
+# look at 6 clusters 
+s <- silhouette(kmeans_6$cluster, dist.mat)
+# average silhouette width
+overall_mean_6 <- mean(s[, 3])
+
+# compute length of clusters 
+s_df <- data.frame(cluster = s[,1], sil_width = s[,3])
+cluster1_length = dim(s_df %>% filter(cluster == 1))[1]
+cluster2_length = dim(s_df %>% filter(cluster == 2))[1]
+cluster3_length = dim(s_df %>% filter(cluster == 3))[1]
+cluster4_length = dim(s_df %>% filter(cluster == 4))[1]
+cluster5_length = dim(s_df %>% filter(cluster == 5))[1]
+cluster6_length = dim(s_df %>% filter(cluster == 6))[1]
+lengths <- c(cluster1_length, cluster2_length, 
+             cluster3_length, cluster4_length, 
+             cluster5_length, cluster6_length)
+
+# plot for 6 clusters
+p4 <- ggplot() + 
+  geom_col(data = s_df %>% 
+               filter(cluster == 1) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c(1:lengths[1])), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'darkolivegreen3', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 2) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((lengths[1] + 1):(sum(lengths[1:2])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'cyan4', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 3) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:2]) + 1):(sum(lengths[1:3])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill= 'coral1', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 4) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:3]) + 1):(sum(lengths[1:4])))), 
+           aes(y = sil_width, x = order), width = 1, 
+           fill= 'black', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 5) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:4])+ 1):(sum(lengths[1:5])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill = 'red4', alpha = 0.5) +
+  geom_col(data = s_df %>% 
+               filter(cluster == 6) %>% 
+               arrange(sil_width) %>% 
+               mutate(order = c((sum(lengths[1:5]) + 1):(sum(lengths[1:6])))), 
+           aes(y = sil_width, x = order), width = 1,  
+           fill= 'mediumpurple3',alpha = 0.5) +
+  coord_flip() + 
+  labs(y = "Silhouette Width") + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  plot_theme
+
+# plot together
+grid.arrange(p1,p2,p3,p4, ncol = 2)
+@
+We get that the average silhouette width for each clustering is \Sexpr{round(overall_mean_3,3)}, \Sexpr{round(overall_mean_4,3)}, \Sexpr{round(overall_mean_5,3)}, and \Sexpr{round(overall_mean_6,3)} for three, four, five, and six numbers of clusters respectively. The average widths are all very close to each other, and recalculating the values many times can result in any number of clusters giving the highest value. From investigating the plots for many runs it appeared that often the silhouette plot using six clusters produced one cluster that was very small and had largely negative silhouette widths, so I choose to look further into three, four, or five clusters.  Additionally, it should be noted I also attempted to use the elbow method to address this issues, but there was similar ambiguity about how many clusters was best.   
+
+After projecting many different clusterings onto the map of the United States I decided to present both three and five clusters, because they both give interesting insight into the data and appear to make sense with the geographical groupings we know to be present in the United States.  The majority of the time the three clusters correspond roughly to the South, Northeast, and the remainder of the US, while the five clusters incorporate the clusters that roughly outline the Midwest, Northwest, and West Coast in the addition to the South and Northeast. However, it should be noted that multiple runs can produce fairly different clusterings for both three and five clusters.  There were instances where one of the three clusters covered the entire East Coast and  split the West into two groups, and with five clusters there were instances where the East Coast was merged into one cluster as well.  Additionally, other runs with three clusters where the southern part of the West coast, primarily California were grouped with the Northeast or the grouping presented in Figure~\ref{fig:clustered} where the entire northern part of the country had its own cluster and the other two corresponded to the South and Midwest.  All these sets of these other groupings have some logical interpretation geographically, and result from commonalities in dialect shared by people along the entire East Coast, or by people in the Northeast with those in California, despite there being certain question/answer pairs, such has calling a carbonated beverage "coke" vs. "soda" that split the East Coast into the South and the Northeast. Overall, it appears that using five clusters is more stable than three, but these issues give rise to the indication that the clustering methods are not very stable, which we will investigate in the next section. 
+
+<<clustered, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=2.7, fig.width = 7.5, fig.cap = "Plot of the survey locations labeled with spectral clustering using the location dataset with three and six clusters respectively", fig.pos = "H">>=
+
+# merge data with lables 
+location_with_labels_3 <- cbind(labels_3, ling_location)
+location_with_labels_5 <- cbind(labels_5, ling_location)
+
+# create plots 
+# 3 clusters
+p1 <- ggplot(location_with_labels_3) +
+        geom_point(aes(x = Longitude, y = Latitude, color = labels_3),size = 1) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+            data = state_df, colour = "black", fill = NA)+ 
+        scale_color_discrete(name = "Clusters") + 
+        plot_theme_map
+
+# 5 clusters
+p2 <- ggplot(location_with_labels_5) +
+        geom_point(aes(x = Longitude, y = Latitude, color = labels_5),size = 1) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+            data = state_df, colour = "black", fill = NA) + 
+        scale_color_discrete(name = "Clusters") + 
+        plot_theme_map
+
+# put together 
+grid.arrange(p1,p2, ncol = 2)
+
+@
+
+In addition, to considering the location dataset I also looked at how using k-means on the binary dataset, using the first nine principle components, which I determined was appropriate from looking at scree plots.  Here we see in Figure~\ref{fig:binary} that performing k-means with three clusters results in a mapping that corresponds to what we have seen thus far, just with slightly more intermingling of clusters geographically.  However, using five clusters results in a clustering that doesn't seem to capture any logical grouping of the data, and typically we only see three primary groups that look similar to the results from using three clusters.  Additionally, similar to using the location dataset different runs of the k-means algorithm produce different clusterings for both three and five clusters.  This is a good validation that it is looking into the location dataset was the appropriate choice.  
+<<binary,echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=2.7, fig.width = 7.5, fig.cap = "Plot of the survey locations labeled with spectral clustering using the binary dataset with three and six clusters", fig.pos = "H">>=
+# do kmeans on binary dataset
+kmeans_binary_3 <- kmeans(binary_PCA$x[,1:9], 
+                          centers = 3, iter.max = 1000, nstart = 1)
+kmeans_binary_5 <- kmeans(binary_PCA$x[,1:9], 
+                          centers = 5, iter.max = 1000, nstart = 1)
+
+# save labels
+labels_binary_3 <- as.factor(kmeans_binary_3$cluster)
+labels_binary_5 <- as.factor(kmeans_binary_5$cluster)
+
+# merge data with labels 
+binary_with_labels_3 <- cbind(labels_binary_3, binary_ans)
+binary_with_labels_5 <- cbind(labels_binary_5, binary_ans)
+
+# create plots 
+# three clusters
+p1 <- ggplot(binary_with_labels_3 %>% filter(long > -125)) +
+        geom_point(aes(x = long, y = lat, 
+                       color = labels_binary_3),size = 1) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+            data = state_df, colour = "black", fill = NA)+ 
+        scale_color_discrete(name = "Clusters") + 
+        labs(x = "Longitude", y = "Latitude") + 
+        plot_theme_map 
+
+# five clusters
+p2 <- ggplot(binary_with_labels_5 %>% filter(long > -125)) +
+        geom_point(aes(x = long, y = lat, 
+                       color = labels_binary_5),size = 1) +
+        geom_polygon(aes(x = long, y = lat, group = group),
+            data = state_df, colour = "black", fill = NA) + 
+        scale_color_discrete(name = "Clusters") + 
+        labs(x = "Longitude", y = "Latitude") + 
+        plot_theme_map 
+        
+
+# put maps together
+grid.arrange(p1,p2, ncol = 2)
+@
+
+
+\subsection{Stability of findings to perturbation} 
+As noted in the section discussing clustering different runs of the k-means algorithm produced different results for which locations were clustered together.  From Figure~\ref{fig:3clusters} and Figure~\ref{fig:5clusters} we can see that neither clustering is  completely stable, as both figures show plots that have different clusters.  However, we can see that the clustering with three groupings is less stable than using five groupings, as each of the four plots in Figure~\ref{fig:3clusters} produce different results.  Whereas only one plot in differs from the rest in Figure~\ref{fig:5clusters}, and even in this instance the only substantial difference is the inclusion of the Northwest and West coast into a single cluster, as opposed to two separate ones.  This is a trend I saw throughout many runs of the algorithms, not simply the figures presented here. 
+<<3clusters,echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=5, fig.width = 7.5, fig.cap = "Plots of clustering output for three clusters when running four different k-means on the first eight principal components of the location datasets", fig.pos = "H">>=
+# run spectral clustering 4 times with 3 centers
+kmeans_3 <- lapply(1:4, function(k) {
+    kmeans(location_PCA$x[,1:8], centers = 3)
+  })
+
+# plot the resulting clusters from each run of spectral clustering
+clusters <- lapply(kmeans_3, function(km) {
+  labels <- as.factor(km$cluster)
+  location_with_labels <- cbind(labels, ling_location)
+  p <- ggplot(location_with_labels) +
+    geom_point(aes(x = Longitude, y = Latitude, color = labels), 
+             size = 1) +
+    geom_polygon(aes(x = long, y = lat, group = group),
+               data = state_df, colour = "black", fill = NA) +
+    plot_theme_map + 
+    scale_color_discrete(name = "Clusters")
+})
+
+# arrange plots
+grid.arrange(clusters[[1]], clusters[[2]], 
+             clusters[[3]], clusters[[4]], 
+             ncol = 2)
+@ 
+
+<<5clusters,echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=5, fig.width = 7.5, fig.cap = "Plots of clustering output for five clusters when running four different k-means on the first eight principal components of the location datasets", fig.pos = "H">>=
+# run spectral clustering 4 times with 3 centers
+kmeans.5 <- lapply(1:4, function(k) {
+    kmeans(location_PCA$x[,1:8], centers = 5)
+  })
+
+# plot the resulting clusters from each run of spectral clustering
+clusters <- lapply(kmeans.5, function(km) {
+  labels <- as.factor(km$cluster)
+  location_with_labels <- cbind(labels, ling_location)
+  p <- ggplot(location_with_labels) +
+    geom_point(aes(x = Longitude, y = Latitude, color = labels), 
+             size = 1) +
+    geom_polygon(aes(x = long, y = lat, group = group),
+               data = state_df, colour = "black", fill = NA) + 
+    plot_theme_map + 
+    scale_color_discrete(name = "Clusters") 
+})
+
+# arrange plots
+grid.arrange(clusters[[1]], clusters[[2]], 
+             clusters[[3]], clusters[[4]], 
+             ncol = 2)
+@ 
+
+Finally, we investigate the stability of the use of five clusters by perturbing the location dataset and determining if we find the same clusters.  In order to perturb the data I randomly simulated 10 new pseudo-observations of 758 by 468 matrices filled 0's and 1's, where there was a .14 chance of drawing a 1.  I choose this probability because there are 67 questions corresponding to 67s 1's for each individual per 468 columns, and $\frac{67}{468}= .14$.  I then incorporated the new "observations"  into the binned location dataset and renormalized.  I then recalculated PCA and k-means and produced Figure~\ref{stability}. These observations do not directly correlated to a random answer from a survey, because the 1's could take in place in the vector (i.e. there was no restriction of giving one answer per question).  
+<<stability,echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, dev = "png", fig.align="center", fig.height=5, fig.width = 7.5, fig.cap = "Plots of clustering output for five clusters when running four different k-means on the first eight principal components of the perturbed binned location dataset", fig.pos = "H">>=
+# randomly compute preturbed data
+new_obs <- matrix(rbinom(758*468, 10, 0.14), nrow = 758, ncol = 468)
+
+# add data to the ling_location dataset
+ling_preturbed <- ling_location_orig %>% filter(Longitude > -125)
+ling_preturbed <- ling_preturbed[,4:471] + new_obs
+
+# answers per row
+row_sums <- rowSums(ling_preturbed)
+
+#renormalize
+for(i in 1:dim(ling_preturbed)[1]){
+  ling_preturbed[i,1:468] <- ling_preturbed[ i,1:468]/row_sums[i]
+}
+
+# center new matrix 
+preturbed_matrix <- scale(ling_preturbed, scale = FALSE,
+                          center = TRUE)
+
+# do PCA
+preturbed_PCA <- prcomp(preturbed_matrix)
+
+# run spectral clustering 4 times with 5 centers
+kmeans_preturbed <- lapply(1:4, function(k) {
+    kmeans(preturbed_PCA$x[,1:8], centers = 5)
+  })
+
+# plot the resulting clusters from each run of spectral clustering
+clusters <- lapply(kmeans_preturbed, function(km) {
+  labels <- as.factor(km$cluster)
+  location_with_labels <- cbind(labels, ling_location)
+  p <- ggplot(location_with_labels) +
+    geom_point(aes(x = Longitude, y = Latitude, color = labels), 
+             size = 1) +
+    geom_polygon(aes(x = long, y = lat, group = group),
+               data = state_df, colour = "black", fill = NA) +
+    plot_theme_map
+})
+
+# ararnge plots 
+grid.arrange(clusters[[1]], clusters[[2]], 
+             clusters[[3]], clusters[[4]], 
+             ncol = 2)
+
+@
+Even though, I only added 10 new "observations" the additions changed the the overall structure of the data fairly dramatically, because each "observation" corresponds to adding ten new people into each latitude/longitude square, implying we are adding 7,580 new participants.  In the original data many entries remained zero or had a very small number if only a few people choose that answer.  The noise that was added had an equal chance of providing any answer as well as an equal chance of being at any location in the United, which we also know not to be true.  This perturbation effected the clustering, by making the five groups less defined, but there appears to still be the same basic structure that we saw in the unperturbed data.  Additionally, it seems as if the western part of United States was most effected by this perturbation, while the South, Midwest, and Northeastern clusters remained relatively intact.  This tells me that those grouping are more stable, than the clusters in the West, which make sense considering there is a larger population on the coasts, making those locations less susceptible to noise.  The fact that such adding 7,580 new, completely random observations to the data, did not completely ruin the clustering shows that despite producing different results on occasion the five groupings picked out through spectral clustering have some validity and stability.
+
+\section{Conclusion}
+Overall, the dimension reduction and clustering discussed in this paper appear to show that there the dialectic differences in the United States which can be nicely split into five geographical regions, roughly corresponding to the common divisions of the Northeast, West coast, Midwest, South, and Northwest.  Despite finding some instability in the clustering for different runs of k-means and number of clusters the overall patterns were fairly robust to perturbed the data, particuarily in areas with a large number of observations.  
+
+\end{document}

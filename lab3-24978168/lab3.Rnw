@@ -1,0 +1,224 @@
+\documentclass{article}
+
+\usepackage{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parskip}{\smallskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{amsthm}
+\usepackage{amsmath}
+
+
+\begin{document}
+
+\title{Lab 3 - Parallelizing k-means Stat 215A, Fall 2017}
+
+
+\author{Amy Ko}
+
+\maketitle
+
+Note: The code and other necessary files for generating the plots in this report are included in /data. Please refer to README in /data for a brief description of each file. 
+
+\section{Introduction}
+Assessing the stability of statistical methods is an important part of data analysis as the level of stability can tell us whether the results of the analysis can be trusted or generalized. In this report, I will investigate the stability of k-means clustering on the linguistics dataset by perturbing the input data for different values of $k$, and use the stability results in return to choose an appropriate value of $k$ for the data. Furthermore, I will discuss the computational issues that must be addressed when dealing with large datasets such as running time and memory efficiency. 
+
+
+\section{Data and Method}
+To investigate the stability of k-means, I used the linguistics dataset from lab2 [1]. The data consisted of 45,152 observations (rows) and 468 columns that correspond to the binary responses to the survey questions. The data was used in its original form given in lingBinary.RData.
+
+In order to assess the stability of k-means, I followed the procedure outlined in Figure 2 in Ben-Hur [2], with sampling proportion of 0.5 and number of trials of 100, for each $k = 2, ..., 10$. Furthermore, to measure the similarity between two different cluster assignments, I used the correlation similarity measure, $cor$, described in Equations 1-3 in [2].
+
+
+\section{Results and Discussion}
+\subsection{Running Time Comparison of R and C++}
+Here I compare the running time of R and C++ for computing the correlation similarity. Both methods are implemented in a similar way, where the most computationally intensive component is a double for loop that iterates through every pair of observations, $(i,j)$. Consequently the running time is $O(n^2)$ for both methods, where $n$ is the number of observations. In addition, both methods do not explicitly store the $n$-by-$n$ $C$ matrix described in [2]. Instead, each element, $C_{ij}$, is computed only when it is needed, by iterating over the original cluster assignment vector of size $n$. Therefore the complexity for memory is $O(n)$.
+
+Benchmarking both methods on simulated data with $n = 5000$ showed that the method implemented in C++ was on average 34 times faster than the method in R (2502 ms for R vs. 72 ms for C++). This highlights that the running time may vary greatly between different programming languages and thus we must think critically about computational efficiency, especially when working with large datasets. For the stability analysis of k-means, therefore, I used the method implemented in C++ in order to speed up the computation. 
+
+<<load, echo = FALSE, message = FALSE, warning = FALSE>>=
+library(tidyverse)
+library('Rcpp')
+library('microbenchmark')
+library(gridExtra)
+
+# load lingBinary. The columns are: ID, CITY, STATE, ZIP, lat, long, questions...
+# 467 columns, 45,152 rows
+load("data/lingBinary.RData")
+
+# select ID and question columns only
+data <- lingBinary %>%
+  select(-CITY, -STATE, -ZIP, -lat, -long)
+
+@
+
+
+<<compare_cpp, echo = FALSE, message = FALSE, warning = FALSE,  dev = "png", dpi = 150, fig.height = 4, fig.width = 7, fig.align='center', fig.pos="H">>=
+
+# load cpp file for computing the correlation
+sourceCpp('code/correlation.cpp')
+
+# R function for computing the correlation
+correlationR <- function(x, y){
+  # Compute the correlation measure for x and y
+  # Args:
+  #   x : integer vector, cluster assignment for sample 1
+  #   y : integer vector, cluster assignment for sample 2
+  # NOTE: For each row i, x[i] and y[i] must correspond to the same individual
+  # Returns:
+  #   corr: double, correlation
+  
+  # length of x
+  n = length(x)
+  
+  # return error if length of x does not equal length of y
+  if(n != length(y))
+    return(NULL)
+    
+  # initialize dot product values
+  l1_l1 = 0
+  l2_l2 = 0
+  l1_l2 = 0
+  
+  # Compute <L1, L1>, <L2, L2>, <L1, L2> described in Ben-Hur
+  # Compute the dot products by iterating through each (i,j)
+  for(i in 1:n){
+
+    for(j in i+1:n){
+      
+      # break loop if index j is out of bounds
+      if(j > n) break()
+      
+      # compute C_ij for x and for y
+      # C_ij = 1 if i and j are in the same cluster; 0 otherwise
+      c1_ij <- if(x[i] == x[j]) 1 else 0
+      c2_ij <- if(y[i] == y[j]) 1 else 0
+      
+      # update dot products
+      l1_l1 <- l1_l1 + c1_ij * c1_ij
+      l2_l2 <- l2_l2 + c2_ij * c2_ij
+      l1_l2 <- l1_l2 + c1_ij * c2_ij 
+      
+      
+    }    
+  }
+
+  # return correlation
+  return(l1_l2 / (sqrt(l1_l1) * sqrt(l2_l2)))
+  
+  
+}
+
+# generate test data for benchmarking
+n <- 5000 # sample size
+k <- 3 # number of clusters
+x <- sample(1:k, n, replace = TRUE) # fake cluster assignment
+y <- sample(1:k, n, replace = TRUE) # fake cluster assignment
+
+# compare time
+# uncomment the following line to actually run benchmarking
+# microbenchmark(correlationR(x, y), correlationCPP(x, y), times = 5)
+
+@
+
+
+\subsection{Stability of k-means}
+Figure \ref{corr_hist} shows the distribution of the correlation measure for different values of $k$. We can see that $k=3$ produced the most stable results with high mean and low variance in the distribution. Interestingly, $k=2$ produced a bimodal distribution, where about half of the runs produced correlation values near 1 whereas the other half gave lower values around .75. As the number of clusters increases beyond 3, the spread of the distribution generally becomes greater and the mean shifts to the left, indicating that k-means becomes increasingly unstable beyond $k = 3$. Figure \ref{corr_cumulative} also tells the same story, where the cumulative density shows that more correlation values are near 1 for $k = 3$ than any other choice of $k$. Therefore, I would choose $k=3$ to cluster the linguistics dataset. Choosing $k=3$ would also agree with my previous finding that three clusters produced the lowest average silhouette value in lab 2, which suggests that using the stability measure in this way may be a reliable method for choosing an appropriate value of $k$. 
+
+\begin{figure}
+<<corr_hist, echo = FALSE, message = FALSE, warning = FALSE, dev = "png", dpi = 150, fig.height = 6, fig.width = 7, fig.align='center', fig.pos="H">>=
+
+plotHistogram <- function(corr, k){
+  # Plot the histogram of the data and label it. e.g. label is "k2" if k=2.
+  # Args:
+  #   corr : nuemric vector, contains correlation values for a particular k
+  #   k : integer, number of clusters
+  # Returns:
+  #   plot : ggplot, histogram of correlation values for given k
+  
+  plot <- ggplot(results) + 
+          # histogram of the correlation values
+          geom_histogram(aes(x = corr), binwidth = .01, 
+                         color = "black", fill = "blue") +
+          # label plot
+          annotate("text", x = .4, y = 30, label = paste("k = ", k), size = 4) + 
+          # set axes limits
+          ylim(0, 30) + 
+          xlim(.3, 1) + 
+          # make it pretty
+          theme_classic() + 
+          theme(axis.title.x = element_blank(),
+                axis.title.y = element_blank())
+  
+
+  return(plot)
+
+}
+
+# load kmeans stability test results
+results <- read.table('code/kmeans_corr_results.txt', header=TRUE)
+
+# plot histograms for k=2 through 10
+plots <- lapply(1:9, function(k){plotHistogram(results[,k], k+1)})
+
+# show plot in a grid
+grid.arrange(plots[[1]], plots[[2]], plots[[3]],
+             plots[[4]], plots[[5]], plots[[6]],
+             plots[[7]], plots[[8]], plots[[9]],
+             ncol = 3, left = "Frequency", bottom = "Correlation similarity")   
+
+@
+\caption{Distribution of the correlation similarity for different values of $k$.}
+\label{corr_hist}
+\end{figure}
+
+
+\begin{figure}
+<<corr_cumulative, echo = FALSE, message = FALSE, warning = FALSE, dev = "png", dpi = 150, fig.height = 5, fig.width = 7, fig.align='center', fig.pos="H">>=
+
+# change the column names
+# this will make it eaiser to order the elemenets in the legend later
+colnames(results) <- c("k02", "k03", "k04","k05", "k06", 
+                       "k07","k08", "k09", "k10")
+
+# plot the cumulative distribution 
+results %>%
+  # sort each column in increasing order
+  mutate_all(sort) %>%
+  # convert the dataframe into long form
+  gather(key = "k", value = "corr", k02:k10) %>%
+  # group by k
+  group_by(k) %>%
+  # plot!
+  ggplot() +
+    # plot cumulative distribution; color code by k
+    # y =  [.01, .02, ..., 1.00] replicated 9 times (one for each k)
+    geom_point(aes(x = corr, y = rep(cumsum(rep(.01, 100)), 9), 
+                   color = k)) + 
+    # label axes
+    labs(y = "Cumulative density", x = "Correlation similarity") + 
+    # make the legend pretty
+    scale_color_discrete(breaks=c("k02", "k03", "k04","k05", "k06", 
+                                  "k07","k08", "k09", "k10"),
+                        labels=c("2","3","4","5","6","7","8","9","10")) + 
+    theme_classic()
+
+
+  
+@
+\caption{Cumulative distribution of the correlation similarity for different values of $k$.}
+\label{corr_cumulative}
+\end{figure}
+
+
+\section{Conclusion}
+In this report, we explored the stability of the k-means algorithm on the linguistics dataset by perturbing the input data, and using the results in return to choose an appropriate value of $k$. We saw that $k = 3$ produced the most stable results in terms of correlation similarity, which agrees with our previous finding that $k=3$ also gave the lowest average silhouette value. Furthermore, we saw that C++ was about 34 times faster in computing the correlation measure than R, which emphasizes how the choice of programming language and how we implement the code may have a great impact on the computational efficiency of analyzing large datasets.
+
+\begin{thebibliography}{1}
+\bibitem{linguistic}Vaux, Bert. "Harvard Dialect Survey." dialect.redlog.net. Harvard University. 2003. Web.
+\bibitem{similarity} Asa Ben-Hur, André Elisseeff, and Isabelle Guyon. A stability based method for discovering structure in clustered data. In Pacific symposium on biocomputing, volume 7, pages 6–17, 2001.
+\end{thebibliography}
+
+
+\end{document}

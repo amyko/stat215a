@@ -4,3 +4,4 @@ Here's a brief summary of the files included in this folder.
 3) kmeans.R : helper functions for running the stability test, such as subsampling, calling k-means, etc.
 4) kmeans_corr_results.txt: correlation results saved from the SCF cluster.
 5) run_jobs.sh : bash script for submitting the job to the cluster
+6) hw3.R : EM code for homework 3

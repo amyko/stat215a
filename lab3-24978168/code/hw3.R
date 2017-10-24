@@ -4,13 +4,14 @@ library(tidyverse)
 # simulation parameters: mu_0 = 10 and a range of mu_1's
 n <- 100 # number of observations from each cluster
 mu_0 <- 10 # mean of the first poisson distribution
-mu_1 = c(12, 14, 16, 18) # means for the second poisson
+mu_1 = c(12,14,16,18) # means for the second poisson
 
 # convergence threshold: stop if each of the current estimate is 
 # within .01 of the previous estimate
-conv <- .01
+conv <- 0.001
 # break if EM runs for more than this number of iterations
-max_iter <- 1000
+max_iter <- 5000
+
 
 # run EM for mu_0 = 1 and a range of mu_1's
 result <- lapply(mu_1, function(mu_1) testEM(mu_0, mu_1, n, conv, max_iter))
@@ -44,10 +45,10 @@ testEM <- function(mu_0, mu_1, n, conv, max_iter){
   x <- c(x_1, x_2)
   
   # get initial guess from kmeans
-  init <- computeInitialTheta(x)
+  init <- computeInitialTheta(x, 2*n)
 
   # run EM
-  result <- runEM(x, pi, mu_0, mu_1, conv, max_iter)    
+  result <- runEM(x, init[1], init[2], init[3], conv, max_iter)    
   
   # assign to cluster
   cluster <- assignToCluster(x, result[1], result[2], result[3])
@@ -83,7 +84,7 @@ assignToCluster <- function(x, pi, mu_0, mu_1){
 
 
 # compute initial values from kmeans clustering
-computeInitialTheta <- function(x){
+computeInitialTheta <- function(x, n){
   # Input: x is the observation vector
   # Output: vector containing initial guesses for pi, mu_0, mu_1
   
@@ -102,7 +103,7 @@ computeInitialTheta <- function(x){
   }
   
   # initial guess for the parameters
-  pi <- sum(kmeans$cluster == 1) / 100
+  pi <- sum(kmeans$cluster == 1) / n
   mu_0 <- mean(x[kmeans$cluster == 1])
   mu_1 <- mean(x[kmeans$cluster == 2])
   
@@ -113,6 +114,10 @@ computeInitialTheta <- function(x){
 
 # run EM
 runEM <- function(x, pi, mu_0, mu_1, conv, max_iter){
+  # Input: x is the observation vector
+  #        pi, mu_0, mu_1 are the initial guesses
+  #        conv, max_iter are stopping criteria
+  # Output: vector containing estimates for pi, mu_0, mu_1
   
   # return true if EM converged
   converged <- function(theta_prev, theta_curr, conv){
@@ -124,19 +129,20 @@ runEM <- function(x, pi, mu_0, mu_1, conv, max_iter){
   
 
   
-  theta_prev <- c(mu_0, mu_1, pi)
-  T_0 <- computeTij(x, 0, .5, mu_0, mu_1)
-  T_1 <- computeTij(x, 1, .5, mu_0, mu_1)
+  theta_prev <- c(pi, mu_0, mu_1)
+  T_0 <- computeTij(x, 0, pi, mu_0, mu_1)
+  T_1 <- computeTij(x, 1, pi, mu_0, mu_1)
   theta_curr <- estimateParams(x, T_0, T_1)
 
   
   i <- 0
   
   while(!converged(theta_prev, theta_curr, conv) & i < max_iter){
+  #while(i < max_iter){
     
     theta_prev <- theta_curr
-    T_0 <- computeTij(x, 0, .5, mu_0, mu_1)
-    T_1 <- computeTij(x, 1, .5, mu_0, mu_1)
+    T_0 <- computeTij(x, 0, theta_curr[1], theta_curr[2], theta_curr[3])
+    T_1 <- computeTij(x, 1, theta_curr[1], theta_curr[2],theta_curr[3])
     theta_curr <- estimateParams(x, T_0, T_1)
     
     i <- i + 1
@@ -172,6 +178,7 @@ computeTij <- function(x, z, pi, mu_0, mu_1){
   return(num / denom)
   
 } 
+
 
 
 # estimate pi, mu_0, and mu_1, given T_ji

@@ -1,0 +1,183 @@
+R version 3.4.1 (2017-06-30) -- "Single Candle"
+Copyright (C) 2017 The R Foundation for Statistical Computing
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> ## Load Packages
+  > library("doParallel")
+Loading required package: foreach
+foreach: simple, scalable parallel programming from Revolution Analytics
+Use Revolution R for scalability, fault tolerance and more.
+http://www.revolutionanalytics.com
+Loading required package: iterators
+Loading required package: parallel
+Warning messages:
+  1: package ‘doParallel’ was built under R version 3.4.2 
+2: package ‘foreach’ was built under R version 3.4.2 
+> library('foreach')
+> library('rlecuyer')
+> library('Rcpp')
+Warning message:
+  package ‘Rcpp’ was built under R version 3.4.2 
+> library('microbenchmark')
+Warning message:
+  package ‘microbenchmark’ was built under R version 3.4.2 
+> library('ggplot2')
+> library("tidyverse")
+Loading tidyverse: tibble
+Loading tidyverse: tidyr
+Loading tidyverse: readr
+Loading tidyverse: purrr
+Loading tidyverse: dplyr
+Conflicts with tidy packages --------------------------------------------------------------------------------
+  accumulate(): purrr, foreach
+filter():     dplyr, stats
+lag():        dplyr, stats
+when():       purrr, foreach
+Warning message:
+  package ‘dplyr’ was built under R version 3.4.2 
+> 
+  > ## Set WD and load data
+  > setwd("~/stat215a/lab3-25948127/data")
+> load("lingBinary.RData")
+> 
+  > ## Retain only the numerical answers
+  > binary_data <- lingBinary %>%
+  +   select(-ID, -CITY, -STATE, -ZIP, -lat, -long) %>%
+  +   drop_na()
+> 
+  > rm(lingBinary)
+> 
+  > ## Wrapper that calculates kmeans then returns the clusters
+  > 
+  > kMeansWrapper <- function(data, k){
+    +   clusters <- kmeans(scale(data), k)
+    +   return(clusters$cluster)
+    + }
+> 
+  > # JaccardR: Computes Jaccard similarity
+  > JaccardR <- function(data1, data2){
+    +   M1 <- data1 %o% data2 # outer product of first matrix and second
+    +   M2 <- data2 %o% data1 # outer product of second matrix and first
+    +   M12 <- sum(sum(M1 * M2)) # Sum the pairwise elements, then sum again for intersected scalar distance
+    +   J <- M12 / (sum(sum(M1)) + sum(sum(M2)) - M12) # Intersected scalar distance over total scalar distance
+    +   return(J) # Return similarity measure
+    + }
+> 
+  > ## Source C++
+  > sourceCpp("~/stat215a/lab3-25948127/R/Jaccard.cpp")
+> 
+  > ## Cluster Similarity Function
+  > ClusterSim <- function(data, fraction, clustering.method, kclusters, similarity.method){
+    +   # Create two subsamples
+      +   sample1 <- sort(sample(nrow(data), nrow(data) * fraction, replace=FALSE))
+      +   sample2 <- sort(sample(nrow(data), nrow(data) * fraction, replace=FALSE))
+      +   # Cluster them (call the kmeanswrapper for actual use)
+        +   cluster1 <- clustering.method(sample1, kclusters)
+        +   cluster2 <- clustering.method(sample2, kclusters)
+        +   
+          +   # Subset each group to the observations that appear in the other sample
+          +   intersect1 <- sample1 %in% sample2
+          +   intersect2 <- sample2 %in% sample1
+          +   
+            +   # Apply similarity method to return the result
+            +   return(similarity.method(cluster1[intersect1], cluster2[intersect2]))
+          + }
+> 
+  > # Microbenchmarks
+  > ## Benchmark the relative performance of the R and C++ versions with .5 of the data
+  > microbenchmark(ClusterSim(binary_data, fraction = .2, kMeansWrapper, kclusters = 2, similarity.method = JaccardR),
+                   +                ClusterSim(binary_data, .2, kMeansWrapper, 2,
+                                               +                                 similarity.method = JaccardCPP))
+Unit: milliseconds
+expr
+ClusterSim(binary_data, fraction = 0.2, kMeansWrapper, kclusters = 2,      similarity.method = JaccardR)
+ClusterSim(binary_data, 0.2, kMeansWrapper, 2, similarity.method = JaccardCPP)
+min        lq     mean    median        uq       max neval
+40.527082 44.921380 58.16431 57.677785 65.199690 136.94597   100
+7.112562  7.805439  8.67742  8.190167  8.742645  33.37842   100
+> 
+  > ## Parallel
+  > 
+  > ### Initialize the Clusters
+  > cl <- parallel::makeCluster(8)
+> registerDoParallel(cl)
+> ### Set up 100 simulations
+  > n <- 100
+> 
+  > ## R function
+  > ### Create an empty list that will store the dataframes
+  > listofdfs <- list()
+> ### For loop that does 100 simulations with k = [2:10], and saves the results into
+  > ### a dataframe, providing an ID corresponding to the number of clusters the 
+  > ### result corresponds to
+  > for (k in seq(2,10)){
+    +   # Track which k the loop is working on
+      +   print(sprintf("%d simulations with k=%d...", n, k))
+    +   # foreach loop to do 100 simulations
+      +   sims <- foreach(i = 1:n) %dopar% 
+        +     ClusterSim(binary_data, .2, kMeansWrapper, k,
+                         +                similarity.method = JaccardR)
+      +   # convert results into numeric
+        +   sims <- unlist(lapply(sims[1:n], as.numeric))
+        +   # Save results in a dataframe
+          +   sims_df <- data.frame(sim_value=sims)
+          +   # Mutate a "kID" variable to identify how many clusters when I merge later
+            +   sims_df <- sims_df %>% mutate(kID = k)
+            +   # Save each k-dataframe into a list
+              +   listofdfs[[k]] <- sims_df
+              + }
+[1] "100 simulations with k=2..."
+[1] "100 simulations with k=3..."
+[1] "100 simulations with k=4..."
+[1] "100 simulations with k=5..."
+[1] "100 simulations with k=6..."
+[1] "100 simulations with k=7..."
+[1] "100 simulations with k=8..."
+[1] "100 simulations with k=9..."
+[1] "100 simulations with k=10..."
+> 
+  > ## Combine all of the k-dataframes in the list into one dataframe, and save a csv
+  > sims_df <- bind_rows(listofdfs)
+> write.csv(sims_df, "RSim.csv")
+> 
+  > ## CPP Function
+  > ## Repeat above with C++ function
+  > listofdfs <- list()
+> for (k in seq(2,10)){
+  +   print(sprintf("%d simulations with k=%d...", n, k))
+  +   sims <- foreach(i = 1:n) %do% 
+    +     ClusterSim(binary_data, .2, kMeansWrapper, k,
+                     +                      similarity.method = JaccardCPP)
+  +   sims <- unlist( lapply(sims[1:n], as.numeric) )
+  +   sims_df <- data.frame(sim_value=sims)
+  +   sims_df <- sims_df %>% mutate(kID = k)
+  +   listofdfs[[k]] <- sims_df
+  + }
+[1] "100 simulations with k=2..."
+[1] "100 simulations with k=3..."
+[1] "100 simulations with k=4..."
+[1] "100 simulations with k=5..."
+[1] "100 simulations with k=6..."
+[1] "100 simulations with k=7..."
+[1] "100 simulations with k=8..."
+[1] "100 simulations with k=9..."
+[1] "100 simulations with k=10..."
+There were 50 or more warnings (use warnings() to see the first 50)
+> 
+  > sims_df <- bind_rows(listofdfs)
+> write.csv(sims_df, "CPPsim.csv")
+> 
+  > # Stop the Cluster
+  > stopCluster(cl)

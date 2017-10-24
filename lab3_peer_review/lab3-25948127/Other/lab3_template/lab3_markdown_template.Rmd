@@ -1,0 +1,26 @@
+---
+title: "Lab 3 - Parallelizing k-means Stat 215A, Fall 2017"
+author: "Your name"
+date: "day/month/2017"
+header-includes:
+   - \usepackage{float}
+output: 
+  pdf_document:
+    number_sections: true
+---
+
+
+Feel free to decide the sections for your self.
+
+The things you need to do are:
+
+- compare C++ and R versions of the similarity matrix
+
+- make the plot for part 3
+
+- discuss how many clusters to choose
+
+- discuss whether you trust the method or not
+
+
+Take extra care on your code for this lab. A significant portion of the grade will be on your code!

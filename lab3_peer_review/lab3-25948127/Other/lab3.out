@@ -1,0 +1,68 @@
+
+R version 3.4.1 (2017-06-30) -- "Single Candle"
+Copyright (C) 2017 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> ## Load Packages
+> library("doParallel")
+Loading required package: foreach
+Loading required package: iterators
+Loading required package: parallel
+> library('foreach')
+> library('rlecuyer')
+> library('Rcpp')
+> library('microbenchmark')
+> library('ggplot2')
+> library("tidyverse")
+Loading tidyverse: tibble
+Loading tidyverse: tidyr
+Loading tidyverse: readr
+Loading tidyverse: purrr
+Loading tidyverse: dplyr
+Conflicts with tidy packages ---------------------------------------------------
+accumulate(): purrr, foreach
+filter():     dplyr, stats
+lag():        dplyr, stats
+when():       purrr, foreach
+> 
+> ## Set WD and load data
+> setwd("~/stat215a/lab3-25948127/lab3_template/data")
+> load("lingBinary.RData")
+> 
+> ## Retain only the numerical answers
+> binary_data <- lingBinary %>%
++   select(-ID, -CITY, -STATE, -ZIP, -lat, -long) %>%
++   drop_na()
+> 
+> ## Wrapper for kmeans for later use in the for loop
+> 
+> kMeansWrapper <- function(data, k){
++   clusters <- kmeans(scale(data), k)
++   return(clusters$cluster)
++ }
+> 
+> # Jaccard.matrix: Computes Jaccard similarity
+> Jaccard.matrix <- function(data1, data2){
++   M1 <- data1 %o% data2 # outer product of first matrix and second
++   M2 <- data2 %o% data1 # outer product of second matrix and first
++   M12 <- sum(sum(M1 * M2)) # Sum the pairwise elements, then sum again for intersected scalar distance
++   J <- M12 / (sum(sum(M1)) + sum(sum(M2)) - M12) # Intersected scalar distance over total scalar distance
++   return(J)
++ }
+> 
+> ## C++
+> sourceCpp("~/stat215a/lab3-25948127/R/Jaccard.cpp")

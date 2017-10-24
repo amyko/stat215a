@@ -1,0 +1,36 @@
+\documentclass{article}
+
+\usepackage{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parskip}{\smallskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{amsthm}
+\usepackage{amsmath}
+
+
+\begin{document}
+
+\title{Lab 3 - Parallelizing k-means Stat 215A, Fall 2017}
+
+
+\author{Your name}
+
+\maketitle
+
+
+Feel free to decide the sections for your self.
+
+The things you need to do are:
+
+\begin{itemize}
+\item compare C++ and R versions of the similarity matrix
+\item make the plot for part 3
+\item discuss how many clusters to choose
+\item discuss whether you trust the method or not
+\end{itemize}
+
+Take extra care on your code for this lab. A significant portion of the grade will be on your code!
+
+\end{document}

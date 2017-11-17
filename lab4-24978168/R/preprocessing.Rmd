@@ -1,0 +1,68 @@
+---
+  title: "Alan's Stuff"
+output: html_document
+---
+  
+## Load data
+```{r load_data, include=FALSE}
+library(tidyverse)
+library(gridExtra)
+library(corrplot)
+library(caret)
+
+# Get the data for three images
+path <- "data/"
+image1 <- read.table(paste0(path, 'image1.txt'), header = F)
+image2 <- read.table(paste0(path, 'image2.txt'), header = F)
+image3 <- read.table(paste0(path, 'image3.txt'), header = F)
+
+# Add informative column names.
+collabs <- c('y','x','label','NDAI','SD','CORR','DF','CF','BF','AF','AN')
+names(image1) <- collabs
+names(image2) <- collabs
+names(image3) <- collabs
+
+```
+
+## Visualize correlations
+```{r}
+
+
+```
+
+## Train QDA with different preprocessing steps
+```{r}
+library(caret)
+
+train_set <- image1 %>% dplyr::select(label, NDAI, SD, CORR)
+train_set <- train_set %>% filter(label != 0)
+fit_1 <- train(as.factor(label) ~ ., data = train_set,
+               preProcess = c("center", "scale", "YeoJohnson", "nzv", "pca"),
+               method = "qda")
+fit_2 <- train(as.factor(label) ~ ., data = train_set,
+               preProcess = c("center", "scale", "YeoJohnson", "nzv"),
+               method = "qda")
+fit_3 <- train(as.factor(label) ~ ., data = train_set,
+               preProcess = c("center", "scale"),
+               method = "qda")
+fit_4 <- train(as.factor(label) ~ ., data = train_set,
+               method = "qda")
+fit_5 <- train(as.factor(label) ~ ., data = train_set,
+               preProcess = c("ica"),
+               method = "qda")
+  
+```
+
+# Test accuracy
+```{r}
+
+test_set <- image2 %>% bind_rows(image3) %>% dplyr::select(label, NDAI, SD, CORR) %>% filter(label != 0)
+
+fit_list <- list(f1 = fit_1, f2 = fit_2, f3 = fit_3, f4 = fit_4, f5 = fit_5)
+pred_list <- predict(fit_list, newdata = test_set)
+
+cm_list <- lapply(pred_list, function(x) confusionMatrix(x, test_set$label))
+
+```
+
+

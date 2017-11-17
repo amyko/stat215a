@@ -1,0 +1,4 @@
+Description of files contained in this folder:
+qda_rf.R - R code for creating plots related QDA and random forest, and exploratory data analysis
+lab4_LDSD.R - R code for creating plots related to LDSD and exploratory data analysis
+preprocessing.Rmd - contains R code for preprocessing the features

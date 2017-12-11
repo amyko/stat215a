@@ -1,0 +1,4 @@
+Description of files:
+
+model.R - helper functions for model selection, such as computeRSS, computeAIC, etc.
+analysis.R - code for generating the plots in the report. Sources the functions in model.R 
